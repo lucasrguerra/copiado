@@ -1,0 +1,52 @@
+name: Pacote
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+
+permissions:
+  contents: write
+
+jobs:
+  pacote:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verificar código
+        run: |
+          python3 -m py_compile copiado.py
+          shellcheck instalar.sh desinstalar.sh empacotamento/gerar-deb.sh
+
+      - name: Definir versão
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            echo "VERSAO=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+          else
+            echo "VERSAO=0.0.0~dev${GITHUB_RUN_NUMBER}" >> "$GITHUB_ENV"
+          fi
+
+      - name: Gerar .deb
+        run: empacotamento/gerar-deb.sh "$VERSAO"
+
+      - name: Testar instalação do pacote
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y ./dist/copiado_all.deb
+          test -x /usr/bin/copiado
+          test -f /etc/xdg/autostart/copiado.desktop
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: copiado-${{ env.VERSAO }}
+          path: dist/copiado_all.deb
+
+      - name: Publicar release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/copiado_all.deb \
+            --title "Copiado $VERSAO" --generate-notes
