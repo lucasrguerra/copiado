@@ -2,9 +2,11 @@
 """Copiado: histórico da área de transferência no estilo Windows 11 (Win+V).
 
 Uso:
-  copiado.py          inicia em segundo plano (vigia o Ctrl+C)
-  copiado.py show     abre a janelinha do histórico
-  copiado.py esquecer apaga todo o histórico, inclusive os fixados
+  copiado             inicia em segundo plano (vigia o Ctrl+C)
+  copiado show        abre a janelinha do histórico
+  copiado esquecer    apaga todo o histórico, inclusive os fixados
+  copiado consertar   recria o atalho Win+V e inicia o app se estiver parado
+  copiado ajuda       mostra esta ajuda
 """
 import hashlib
 import json
@@ -406,5 +408,111 @@ class App(Gtk.Application):
         return False
 
 
+# ---------- comandos de manutenção (não abrem janela) ----------
+ATALHOS = "org.cinnamon.desktop.keybindings"
+CAMINHO_ATALHO = "/org/cinnamon/desktop/keybindings/custom-keybindings/{}/"
+
+
+def gsettings(*args):
+    return subprocess.run(["gsettings", *args], capture_output=True,
+                          text=True, check=True).stdout.strip()
+
+
+def ler_lista(valor):
+    # gsettings devolve algo como "['custom0']" ou "@as []"
+    return json.loads(valor.replace("@as ", "").replace("'", '"'))
+
+
+def esquema(ident):
+    return f"{ATALHOS}.custom-keybinding:" + CAMINHO_ATALHO.format(ident)
+
+
+def configurar_atalho():
+    """Cria (ou corrige) o atalho Win+V e faz o Cinnamon recarregá-lo."""
+    lista = ler_lista(gsettings("get", ATALHOS, "custom-list"))
+    ident = next((i for i in lista
+                  if gsettings("get", esquema(i), "binding") == "['<Super>v']"), None)
+    if ident is None:
+        ident = next(f"custom{n}" for n in range(1000) if f"custom{n}" not in lista)
+        lista.append(ident)
+    gsettings("set", esquema(ident), "name", "Copiado")
+    gsettings("set", esquema(ident), "command", "copiado show")
+    gsettings("set", esquema(ident), "binding", "['<Super>v']")
+    # o Cinnamon só relê os atalhos quando a lista muda
+    gsettings("set", ATALHOS, "custom-list", "[]")
+    time.sleep(0.5)
+    gsettings("set", ATALHOS, "custom-list", json.dumps(lista).replace('"', "'"))
+    return ident
+
+
+def remover_atalho():
+    lista = ler_lista(gsettings("get", ATALHOS, "custom-list"))
+    nossos = [i for i in lista if "copiado" in gsettings("get", esquema(i), "command")]
+    for ident in nossos:
+        gsettings("reset-recursively", esquema(ident))
+    restantes = [i for i in lista if i not in nossos]
+    gsettings("set", ATALHOS, "custom-list", json.dumps(restantes).replace('"', "'"))
+
+
+def esta_rodando():
+    bus = Gio.bus_get_sync(Gio.BusType.SESSION)
+    resp = bus.call_sync("org.freedesktop.DBus", "/org/freedesktop/DBus",
+                         "org.freedesktop.DBus", "NameHasOwner",
+                         GLib.Variant("(s)", ("io.github.copiado",)),
+                         GLib.VariantType("(b)"), Gio.DBusCallFlags.NONE, -1, None)
+    return resp.unpack()[0]
+
+
+def iniciar_em_segundo_plano():
+    subprocess.Popen([sys.executable, os.path.realpath(__file__)],
+                     stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                     stderr=subprocess.DEVNULL, start_new_session=True)
+    for _ in range(30):
+        time.sleep(0.2)
+        if esta_rodando():
+            return True
+    return False
+
+
+def consertar():
+    try:
+        ident = configurar_atalho()
+        print(f"✓ Atalho Win+V configurado e recarregado ({ident}).")
+    except (OSError, subprocess.CalledProcessError) as erro:
+        print(f"✗ Não consegui configurar o atalho: {erro}")
+        return 1
+    if esta_rodando():
+        print("✓ O Copiado já está rodando.")
+    elif iniciar_em_segundo_plano():
+        print("✓ O Copiado estava parado e foi iniciado.")
+    else:
+        print("✗ Não consegui iniciar o Copiado. Rode 'copiado' para ver o erro.")
+        return 1
+    print("Pronto! Aperte Win+V.")
+    print("Se ainda não abrir, veja se outro atalho usa Win+V em")
+    print("Configurações do Sistema → Teclado → Atalhos.")
+    return 0
+
+
+def main(argv):
+    comando = argv[1] if len(argv) > 1 else ""
+    if comando in ("ajuda", "-h", "--help"):
+        print(__doc__.strip())
+        return 0
+    if comando == "consertar":
+        return consertar()
+    if comando == "instalar-atalho":
+        configurar_atalho()
+        return 0
+    if comando == "remover-atalho":
+        remover_atalho()
+        return 0
+    if comando not in ("", "show", "esquecer"):
+        print(f"Comando desconhecido: {comando}\n")
+        print(__doc__.strip())
+        return 2
+    return App().run(argv)
+
+
 if __name__ == "__main__":
-    sys.exit(App().run(sys.argv))
+    sys.exit(main(sys.argv))

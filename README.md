@@ -41,8 +41,6 @@ A área de transferência pode ter senhas, tokens e dados pessoais, então o Cop
   pasta do Copiado são descartadas.
 - **Não usa rede** e não executa nada do que foi copiado.
 
-Para apagar tudo, inclusive os fixados: `copiado esquecer`
-
 O instalador confere o checksum SHA-256 do pacote antes de instalar, e a esteira
 de CI/CD roda o [Trivy](https://trivy.dev) (vulnerabilidades, segredos e configurações)
 em todo push, em toda release e toda segunda-feira. Os resultados ficam na aba
@@ -54,16 +52,16 @@ em todo push, em toda release e toda segunda-feira. Os resultados ficam na aba
 curl -fsSL https://raw.githubusercontent.com/lucasrguerra/copiado/main/desinstalar.sh | bash
 ```
 
-## Se algo der errado
+## Comandos
 
-- **Win+V não abre nada:** faça o Cinnamon recarregar os atalhos:
-  ```bash
-  gsettings set org.cinnamon.desktop.keybindings custom-list "[]"; gsettings set org.cinnamon.desktop.keybindings custom-list "['custom0']"
-  ```
-  Se ainda assim não abrir, veja se outro atalho usa Win+V em
-  *Configurações do Sistema → Teclado → Atalhos*.
-- **Abre, mas o histórico está vazio:** o app pode não estar rodando. Rode
-  `copiado &`
+| Comando | Para quê |
+|---|---|
+| `copiado consertar` | **Win+V não abre ou o histórico está vazio?** Recria o atalho, faz o Cinnamon recarregá-lo e inicia o app se estiver parado. |
+| `copiado esquecer` | Apaga todo o histórico, inclusive os fixados. |
+| `copiado ajuda` | Lista os comandos. |
+
+Se mesmo depois do `copiado consertar` o Win+V não abrir, veja se outro atalho usa
+Win+V em *Configurações do Sistema → Teclado → Atalhos*.
 
 ## Publicar uma versão nova
 
