@@ -27,14 +27,6 @@ PASTA = os.path.join(GLib.get_user_data_dir(), "copiado")
 ARQ_HIST = os.path.join(PASTA, "historico.json")
 MAX_TEXTO = 1024 * 1024          # textos maiores que 1 MB não são guardados
 MAX_IMAGEM = 20 * 1024 * 1024    # imagens maiores que 20 MB (PNG) também não
-# Gerenciadores de senha (KeePassXC, Bitwarden, 1Password...) marcam o que
-# copiam com estes formatos para pedir que não entre em histórico.
-FORMATOS_SECRETOS = {
-    "x-kde-passwordManagerHint",
-    "application/x-nspasteboard-concealed-type",
-    "x-nspasteboard-concealed-type",
-    "ExcludeClipboardContentFromMonitorProcessing",
-}
 
 CSS = b"""
 #fundo {
@@ -183,9 +175,6 @@ class App(Gtk.Application):
 
     # ---------- captura ----------
     def ao_copiar(self, clip, _evento):
-        ok, alvos = clip.wait_for_targets()
-        if ok and alvos and FORMATOS_SECRETOS & {a.name() for a in alvos}:
-            return  # senha vinda de um gerenciador de senhas: não guarda
         if clip.wait_is_image_available():
             img = clip.wait_for_image()
             if img is None:

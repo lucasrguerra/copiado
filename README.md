@@ -32,8 +32,6 @@ só os itens **fixados** continuam; o resto existe apenas na memória.
 
 A área de transferência pode ter senhas, tokens e dados pessoais, então o Copiado:
 
-- **Ignora senhas de gerenciadores de senha** (KeePassXC, Bitwarden, 1Password etc.),
-  que marcam o que copiam pedindo para não entrar em histórico.
 - **Só grava no disco os itens fixados**, em `~/.local/share/copiado/`, com
   permissão só para você (pasta `700`, arquivos `600`).
 - **Não guarda textos acima de 1 MB nem imagens acima de 20 MB.**
