@@ -1,13 +1,20 @@
 #!/usr/bin/env bash
 # Instala (ou atualiza) o Copiado a partir do pacote publicado no GitHub
 set -e
-URL="https://github.com/lucasrguerra/copiado/releases/latest/download/copiado_all.deb"
+URL="https://github.com/lucasrguerra/copiado/releases/latest/download"
 BASE=org.cinnamon.desktop.keybindings
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 
 echo "==> Baixando a versão mais recente..."
-curl -fsSL -o "$TMP/copiado_all.deb" "$URL"
+curl -fsSL --proto '=https' --tlsv1.2 -o "$TMP/copiado_all.deb" "$URL/copiado_all.deb"
+curl -fsSL --proto '=https' --tlsv1.2 -o "$TMP/SHA256SUMS" "$URL/SHA256SUMS"
+
+echo "==> Conferindo a integridade do pacote..."
+(cd "$TMP" && sha256sum --check --strict --quiet SHA256SUMS) || {
+  echo "ERRO: o pacote baixado não confere com o checksum publicado. Instalação cancelada."
+  exit 1
+}
 chmod 644 "$TMP/copiado_all.deb"
 
 echo "==> Instalando o pacote..."

@@ -4,6 +4,7 @@
 Uso:
   copiado.py          inicia em segundo plano (vigia o Ctrl+C)
   copiado.py show     abre a janelinha do histórico
+  copiado.py esquecer apaga todo o histórico, inclusive os fixados
 """
 import hashlib
 import json
@@ -22,6 +23,16 @@ MAX_ITENS = 25
 LARGURA, ALTURA = 380, 480
 PASTA = os.path.join(GLib.get_user_data_dir(), "copiado")
 ARQ_HIST = os.path.join(PASTA, "historico.json")
+MAX_TEXTO = 1024 * 1024          # textos maiores que 1 MB não são guardados
+MAX_IMAGEM = 20 * 1024 * 1024    # imagens maiores que 20 MB (PNG) também não
+# Gerenciadores de senha (KeePassXC, Bitwarden, 1Password...) marcam o que
+# copiam com estes formatos para pedir que não entre em histórico.
+FORMATOS_SECRETOS = {
+    "x-kde-passwordManagerHint",
+    "application/x-nspasteboard-concealed-type",
+    "x-nspasteboard-concealed-type",
+    "ExcludeClipboardContentFromMonitorProcessing",
+}
 
 CSS = b"""
 #fundo {
@@ -63,25 +74,59 @@ scrollbar slider { background-color: rgba(255,255,255,0.25); border-radius: 4px;
 """
 
 
+def item_valido(item):
+    """Aceita só itens bem formados; imagens só dentro da nossa pasta."""
+    if not isinstance(item, dict) or not isinstance(item.get("dado"), str):
+        return False
+    if item.get("tipo") == "texto":
+        return len(item["dado"]) <= MAX_TEXTO
+    if item.get("tipo") == "imagem":
+        caminho = os.path.realpath(item["dado"])
+        return (os.path.dirname(caminho) == os.path.realpath(PASTA)
+                and caminho.endswith(".png") and os.path.isfile(caminho))
+    return False
+
+
 class Historico:
     def __init__(self):
-        os.makedirs(PASTA, exist_ok=True)
+        # só o próprio usuário pode ler o histórico (pasta 700, arquivos 600)
+        os.umask(0o077)
+        os.makedirs(PASTA, mode=0o700, exist_ok=True)
+        os.chmod(PASTA, 0o700)
+        for nome in os.listdir(PASTA):
+            caminho = os.path.join(PASTA, nome)
+            if os.path.isfile(caminho) and not os.path.islink(caminho):
+                os.chmod(caminho, 0o600)
         self.itens = []  # {"tipo": "texto"|"imagem", "dado": str, "fixo": bool}
         try:
             with open(ARQ_HIST) as f:
-                self.itens = json.load(f)
+                carregados = json.load(f)
+            if isinstance(carregados, list):
+                # como no Windows: ao ligar o PC, só os fixados continuam
+                self.itens = [{"tipo": i["tipo"], "dado": i["dado"], "fixo": True}
+                              for i in carregados if item_valido(i) and i.get("fixo") is True]
         except (OSError, ValueError):
             pass
+        self.salvar()
 
     def salvar(self):
-        with open(ARQ_HIST + ".tmp", "w") as f:
-            json.dump(self.itens, f, ensure_ascii=False)
-        os.replace(ARQ_HIST + ".tmp", ARQ_HIST)
+        # só os fixados vão para o disco; o resto fica apenas na memória
+        fixos = [i for i in self.itens if i["fixo"]]
+        tmp = ARQ_HIST + ".tmp"
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
+        with os.fdopen(fd, "w") as f:
+            json.dump(fixos, f, ensure_ascii=False)
+        os.replace(tmp, ARQ_HIST)
         usadas = {i["dado"] for i in self.itens if i["tipo"] == "imagem"}
         for nome in os.listdir(PASTA):
             caminho = os.path.join(PASTA, nome)
             if nome.endswith(".png") and caminho not in usadas:
                 os.remove(caminho)
+
+    def esquecer_tudo(self):
+        """Apaga o histórico inteiro, inclusive os fixados."""
+        self.itens = []
+        self.salvar()
 
     def adicionar(self, tipo, dado):
         antigo = next((i for i in self.itens if i["tipo"] == tipo and i["dado"] == dado), None)
@@ -125,28 +170,40 @@ class App(Gtk.Application):
         self.criar_janela()
 
     def do_command_line(self, linha):
-        if "show" in linha.get_arguments()[1:]:
+        args = linha.get_arguments()[1:]
+        if "show" in args:
             self.mostrar()
+        elif "esquecer" in args:
+            self.hist.esquecer_tudo()
+            if self.janela.get_visible():
+                self.preencher()
         return 0
 
     # ---------- captura ----------
     def ao_copiar(self, clip, _evento):
+        ok, alvos = clip.wait_for_targets()
+        if ok and alvos and FORMATOS_SECRETOS & {a.name() for a in alvos}:
+            return  # senha vinda de um gerenciador de senhas: não guarda
         if clip.wait_is_image_available():
             img = clip.wait_for_image()
             if img is None:
                 return
             dados = img.save_to_bufferv("png", [], [])[1]
-            nome = hashlib.sha1(dados).hexdigest()[:16] + ".png"
+            if len(dados) > MAX_IMAGEM:
+                return
+            nome = hashlib.sha256(dados).hexdigest()[:32] + ".png"
             caminho = os.path.join(PASTA, nome)
             if caminho == self.ignorar:
                 return
             if not os.path.exists(caminho):
-                with open(caminho, "wb") as f:
+                fd = os.open(caminho, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+                with os.fdopen(fd, "wb") as f:
                     f.write(dados)
             self.hist.adicionar("imagem", caminho)
         else:
             texto = clip.wait_for_text()
-            if not texto or not texto.strip() or texto == self.ignorar:
+            if (not texto or not texto.strip() or len(texto) > MAX_TEXTO
+                    or texto == self.ignorar):
                 return
             self.hist.adicionar("texto", texto)
         if self.janela.get_visible():

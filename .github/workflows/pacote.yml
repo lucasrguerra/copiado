@@ -5,20 +5,69 @@ on:
     branches: [main]
     tags: ["v*"]
   pull_request:
+  schedule:
+    - cron: "0 9 * * 1" # toda segunda: reavalia com a base de vulnerabilidades nova
 
+# por padrão nenhum job pode escrever nada; cada um pede só o que precisa
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  pacote:
+  verificar:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Verificar código
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Checar código
         run: |
           python3 -m py_compile copiado.py
           shellcheck instalar.sh desinstalar.sh empacotamento/gerar-deb.sh
+
+  trivy:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      security-events: write # envia o relatório para a aba Security do GitHub
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Trivy (relatório para a aba Security)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: vuln,secret,misconfig
+          format: sarif
+          output: trivy.sarif
+          exit-code: "0"
+
+      - uses: github/codeql-action/upload-sarif@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
+        if: always()
+        with:
+          sarif_file: trivy.sarif
+          category: trivy
+
+      - name: Trivy (barra a esteira em HIGH/CRITICAL)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: vuln,secret,misconfig
+          severity: HIGH,CRITICAL
+          format: table
+          exit-code: "1"
+          skip-setup-trivy: true
+
+  pacote:
+    needs: [verificar, trivy]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Definir versão
         run: |
@@ -29,7 +78,9 @@ jobs:
           fi
 
       - name: Gerar .deb
-        run: empacotamento/gerar-deb.sh "$VERSAO"
+        run: |
+          empacotamento/gerar-deb.sh "$VERSAO"
+          cd dist && sha256sum copiado_all.deb > SHA256SUMS
 
       - name: Testar instalação do pacote
         run: |
@@ -37,16 +88,39 @@ jobs:
           sudo apt-get install -y ./dist/copiado_all.deb
           test -x /usr/bin/copiado
           test -f /etc/xdg/autostart/copiado.desktop
+          mkdir -p conteudo && dpkg-deb -x dist/copiado_all.deb conteudo
 
-      - uses: actions/upload-artifact@v4
+      - name: Trivy no conteúdo do pacote
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
-          name: copiado-${{ env.VERSAO }}
-          path: dist/copiado_all.deb
+          scan-type: fs
+          scan-ref: conteudo
+          scanners: vuln,secret
+          severity: HIGH,CRITICAL
+          exit-code: "1"
 
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: copiado
+          path: |
+            dist/copiado_all.deb
+            dist/SHA256SUMS
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: pacote
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write # só este job pode publicar
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: copiado
+          path: dist
       - name: Publicar release
-        if: startsWith(github.ref, 'refs/tags/v')
         env:
           GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
         run: |
-          gh release create "$GITHUB_REF_NAME" dist/copiado_all.deb \
-            --title "Copiado $VERSAO" --generate-notes
+          gh release create "$TAG" dist/copiado_all.deb dist/SHA256SUMS \
+            --repo "$GITHUB_REPOSITORY" --title "Copiado ${TAG#v}" --generate-notes

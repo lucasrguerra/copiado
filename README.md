@@ -25,7 +25,28 @@ Para **atualizar**, rode o mesmo comando de novo.
 | Apagar tudo (menos os fixados) | **Limpar tudo** |
 | Fechar sem colar | **Esc** ou clicar fora |
 
-Guarda os 25 últimos itens (texto e imagens) e continua lá depois de reiniciar o PC.
+Guarda os 25 últimos itens (texto e imagens). Como no Windows, ao reiniciar o PC
+só os itens **fixados** continuam; o resto existe apenas na memória.
+
+## Privacidade e segurança
+
+A área de transferência pode ter senhas, tokens e dados pessoais, então o Copiado:
+
+- **Ignora senhas de gerenciadores de senha** (KeePassXC, Bitwarden, 1Password etc.),
+  que marcam o que copiam pedindo para não entrar em histórico.
+- **Só grava no disco os itens fixados**, em `~/.local/share/copiado/`, com
+  permissão só para você (pasta `700`, arquivos `600`).
+- **Não guarda textos acima de 1 MB nem imagens acima de 20 MB.**
+- **Valida o arquivo de histórico** ao abrir: entradas estranhas ou imagens fora da
+  pasta do Copiado são descartadas.
+- **Não usa rede** e não executa nada do que foi copiado.
+
+Para apagar tudo, inclusive os fixados: `copiado esquecer`
+
+O instalador confere o checksum SHA-256 do pacote antes de instalar, e a esteira
+de CI/CD roda o [Trivy](https://trivy.dev) (vulnerabilidades, segredos e configurações)
+em todo push, em toda release e toda segunda-feira. Os resultados ficam na aba
+**Security** do repositório.
 
 ## Desinstalar
 
